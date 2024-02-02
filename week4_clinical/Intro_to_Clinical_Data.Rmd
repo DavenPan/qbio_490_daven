@@ -1,0 +1,264 @@
+---
+title: "Intro to Clinical Data"
+author: Nicole Black, Kayla Xu
+date: 07/17/22
+updated: 01/04/24
+---
+
+### Secure copy (scp) this file to your qbio_490_name repository. DO NOT EDIT IN sp24_course_materials! ###
+
+Welcome to your first experience using TCGA data in R! The first data type we will begin with is clinical data (ex: sex, age at initial diagnosis, tumor subtype, etc.)
+
+
+###### (1) Set up your working environment
+
+Before running this code, make sure you are in the correct working directory (your personal qbio_490_name folder) with getwd() and setwd(). Otherwise you’ll have trouble tracking the data down!
+
+### Follow the instruction in TCGA Data Download before starting this assignment! ###
+
+As good general practice to keep things organized, set the "analysis_data" folder as your working directory ("/PATH/TO/qbio_490_name/analysis_data") whenever you are working with TCGA files. All TCGA data is downloaded to this folder (see "TCGA Data Download")
+
+Set your working directory below:
+
+```{r setup}
+    knitr::opts_knit$set(root.dir = normalizePath("/PATH/TO/analysis_data")) 
+```
+
+Before you move on, go to your GitHub web browser, open your .gitignore, and make sure the following files are listed. 
+
+      ### TCGA Data
+      GDCdata
+      MANIFEST*
+      htseq_h5*
+      analysis_data
+
+The .gitignore file lets Github know which files to NOT push. The loaded files from TCGA are quite large, so we don't want to push them to GitHub. It's also typically best to avoid putting raw data on GitHub.
+
+
+
+###### (2) Query and retrieve the TCGA skin cancer clinical data 
+
+Follow the instructions in "TCGA Data Download" to load the TCGA clinical data for SKCM.
+
+```{r}
+clin_query <- #Fill in correct command
+  
+#You should have already downloaded the TCGA-SKCM clinical data in TCGA Data Download, so DO NOT run GDCdownload(clin_query) again!
+  
+clinical.BCRtab.all <- # Fill in correct command
+  
+```
+
+For this assignment, we will only be working with the base TCGA clinical data (not drug or radiation data). The following lines of code save the base clinical data in a R dataframe called clinic. We will also rename the bcr_patient_barcode as Tumor_Sample_Barcode.
+
+```{r}
+clinic <- clinical.BCRtab.all$clinical_patient_skcm[-c(1,2),]
+colnames(clinic)[ colnames(clinic) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+```
+
+Querying TCGA data can take a while, even without downloading. A faster way to save and access the clinical data is to save the dataframe as a csv file on your local computer. Use the following command to do so:
+
+```{r}
+write.csv(clinic, "/PATH/TO/analysis_data/skcm_clinical_data.csv", row.names=FALSE)
+```
+
+To read the csv back into your environment as a dataframe:
+
+```{r}
+clinic <- read.csv("/PATH/TO/analysis_data/skcm_clinical_data.csv")
+```
+
+
+
+###### (3) Exploring the Data
+
+View the structure of the data as well as the first few lines. What two commands should you use?
+Answer the following questions based on the output of those commands: 
+# 1. How many rows are there? How many columns?
+# 2. What is the data type of $gender?
+# 3. What is the age in years of the 5th patient?
+# 4. How old was the 2nd patient at their last follow up? HINT: you need to look at data from two columns to answer this
+
+```{r Exercise 3.1}
+# write code here
+```
+
+View the column and row names. What two commands should you use?
+
+```{r Exercise 3.2}
+# write code here
+```
+
+View the vital status column. What two notations can be used to view columns? 
+
+```{r Exercise 3.3}
+# write code here
+```
+
+###### (4) Plotting
+
+Choose two variables and make a scatter plot (use the plot() function).
+
+THINK: what types of variables can you use in a scatter plot (continuous, discrete, categorical). Look these up if you need help!
+
+For an extra challenge, add a plot title, axes titles, and colors to your plot.
+
+```{r Exercise 4.1}
+# create plot here
+```
+
+Choose two new variables and make a box plot (use the boxplot() function).
+
+THINK: what types of variables can you use in a box plot?
+
+For an extra challenge, add a plot title, axes titles, and confidence intervals to your plot.
+
+```{r Exercise 4.2}
+# create plot here
+```
+
+
+###### (5) Boolean Masking
+
+As discussed in lecture, a boolean mask is a vector of True and False values that allow for fast and efficient indexing of large dataframes in R. Boolean masks work as an extremely helpful implementation of R's vectorization abilities. 
+
+A significant portion of your coding work will be data cleaning and preparation using boolean masks. As such, it's important you are comfortable with making them.
+
+1) Create a mask to remove all NA values from vital_status
+```{r}
+vital_status_na_mask <- 
+```
+
+2) Create a mask to select for male patients
+```{r}
+male_mask <-
+```
+
+3) Create a mask to select for patients under the age of 35 OR over 60 at diagnosis. 
+```{r}
+under30_over60_mask <-
+```
+
+4) Using your under30_over60_mask, create a new dataframe called no_middle_clinic which contains all the clinical data for patients under the age of 30 or over 60 at diagnosis
+
+```{r}
+no_middle_clinic <- 
+```
+
+
+###### (6) Kaplan-Meier Plotting
+
+To create a KM plot in R, we first need to load some required packages.
+
+```{r}
+if (!require(survival)) {
+  install.packages("survival")
+}
+
+if (!require(survminer)) {
+  install.packages("survminer")
+}
+
+if (!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+
+```
+
+After installing packages as needed, we still need to load them into R to use them in our code.
+
+```{r}
+library(survival)
+library(survminer)
+library(ggplot2)
+```
+
+A KM plot allows us to stratify survival by some clinical feature (or -omic feature!) of interest, therefore providing a simple and understandable plot for seeing how different aspects of a patient's health influence the severity of a disease. Because this requires grouping by a feature, KM plots always involve some categorical value plotted against survival percentage over time. As such, we need to first choose or otherwise create a categorical variable of interest.
+
+For this example, let's create a KM plot to look at the relationship between skin cancer patient age and their rate of survival. 
+
+# 1. Data Preprocessing
+
+First, check if there are any NA values in age_at_diagnosis (Hint: use the is.na() function. If you don't remember how the function works, run ?is.na() in the console). Use Boolean indexing to remove the NA values.
+
+```{r}
+age_NA_mask <- 
+cleaned_clinic <- 
+```
+
+Create a new column called "age_category" in cleaned_clinic that contains the value "Young" if age_at_diagnosis is <=35, "Middle" if >35 and < 50, and "Old" if >=50. (Hint: use ifelse())
+
+Note: These age threshold are relatively arbitrary, and just the ages that we are using in this example. 
+
+```{r}
+cleaned_clinic$age_category <- 
+```
+
+KM Plots also requires a column for total number of days survived post diagnosis. However, TCGA records survival over time two ways: last_contact_days_to for patients who are still alive, and death_days_to for patients who passed away. If a patient is still alive, their value in the death_days_to column is the string "[Not Applicable]" or "[Not Available]". Therefore, we need to create a new column called survival_time that combines the information in these two columns so there are no NA values.
+
+```{r}
+cleaned_clinic$survival_time <- 
+```
+
+If we check the data, we see that the values in survival_time are strings from the "" around each number. We need to convert the values to numeric in order to use them in the KM plot.
+```{r}
+cleaned_clinic$survival_time <- as.numeric(cleaned_clinic$survival_time)
+```
+
+
+Finally, we need to make a death event column that contains T if a patient has died, and F if the patient is alive. (Hint: cleaned_clinic$vital_status has "Alive" if a patient is alive and "Dead" if a patient passed.)
+```{r}
+cleaned_clinic$death_event <- 
+```
+
+
+
+# 2. Create Survminer Objects
+
+Run the following code block.
+```{r}
+survival_object <- Surv(time = cleaned_clinic$survival_time,
+                        event = cleaned_clinic$death_event)
+
+fit_object <- survfit(survival_object ~ age_category, data = cleaned_clinic)
+```
+
+# 3. Create the KM Plot
+
+Run the following code block. The KM plot should appear in the plot tab on the right. Manually expand the tab if you get an error about the plot being too small. 
+```{r}
+survplot <- ggsurvplot(fit_object,
+                       pval=TRUE,
+                       ggtheme = theme(plot.margin = unit(c(1,1,1,1), "cm")),
+                       legend = 'right')
+
+KM_plot <- survplot$plot + theme_bw() + theme(axis.title = element_text(size=20), 
+                                              axis.text = element_text(size=16),
+                                              legend.title = element_text(size=14),
+                                              legend.text = element_text(size=12))
+
+KM_plot
+```
+
+
+Answer the following questions:
+# 1. What does the y axis represent?
+
+# 2. What does the x axis represent?
+
+# 3. What age group appears to have the greatest rate of survival?
+
+# 4. What age group appears to have the worst rate of survival? 
+
+# 5. What is the approx. 15-year survival rate for "Old" skin cancer patients?
+
+# 6. What is the p-value? Is it statistically significant and what does that tell us about the relationship between age and skin cancer survival? 
+
+
+
+###### (6) Submitting Coding HW
+
+Your homework should be a secure copy (scp) of the original file in fa24_course_materials. Push the file to Github through your qbio_490_name local repository and submit a link to your github repo to Blackboard. 
+
+
+
