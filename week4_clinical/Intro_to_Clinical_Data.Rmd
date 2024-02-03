@@ -21,7 +21,7 @@ As good general practice to keep things organized, set the "analysis_data" folde
 Set your working directory below:
 
 ```{r setup}
-    knitr::opts_knit$set(root.dir = normalizePath("/PATH/TO/analysis_data")) 
+    knitr::opts_knit$set(root.dir = normalizePath("/Users/daven/Documents/qbio_490_daven/analysis_data"))
 ```
 
 Before you move on, go to your GitHub web browser, open your .gitignore, and make sure the following files are listed. 
@@ -41,12 +41,21 @@ The .gitignore file lets Github know which files to NOT push. The loaded files f
 Follow the instructions in "TCGA Data Download" to load the TCGA clinical data for SKCM.
 
 ```{r}
-clin_query <- #Fill in correct command
-  
-#You should have already downloaded the TCGA-SKCM clinical data in TCGA Data Download, so DO NOT run GDCdownload(clin_query) again!
-  
-clinical.BCRtab.all <- # Fill in correct command
-  
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(version = "3.18")
+if (!require("TCGAbiolinks", quietly = TRUE))
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+BiocManager::install("maftools")
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+clin_query <- GDCquery (project = "TCGA-SKCM",
+data.category = "Clinical",
+data.type = "Clinical Supplement",
+data.format = 'BCR Biotab')
+clinical.BCRtab.all <- GDCprepare(clin_query)
 ```
 
 For this assignment, we will only be working with the base TCGA clinical data (not drug or radiation data). The following lines of code save the base clinical data in a R dataframe called clinic. We will also rename the bcr_patient_barcode as Tumor_Sample_Barcode.
@@ -59,13 +68,13 @@ colnames(clinic)[ colnames(clinic) == "bcr_patient_barcode" ] <- "Tumor_Sample_B
 Querying TCGA data can take a while, even without downloading. A faster way to save and access the clinical data is to save the dataframe as a csv file on your local computer. Use the following command to do so:
 
 ```{r}
-write.csv(clinic, "/PATH/TO/analysis_data/skcm_clinical_data.csv", row.names=FALSE)
+write.csv(clinic, "/Users/daven/Documents/qbio_490_daven/analysis_data/skcm_clinical_data.csv", row.names=FALSE)
 ```
 
 To read the csv back into your environment as a dataframe:
 
 ```{r}
-clinic <- read.csv("/PATH/TO/analysis_data/skcm_clinical_data.csv")
+clinic <- read.csv("/Users/daven/Documents/qbio_490_daven/analysis_data/skcm_clinical_data.csv")
 ```
 
 
@@ -80,19 +89,29 @@ Answer the following questions based on the output of those commands:
 # 4. How old was the 2nd patient at their last follow up? HINT: you need to look at data from two columns to answer this
 
 ```{r Exercise 3.1}
-# write code here
+print(ncol(clinic))
+print(nrow(clinic))
+## 65 columns, 470 rows
+typeof(clinic$gender)
+##character type output
+print(clinic[5,28])
+##74 years old
+(30286-1856)/365
+##77 years o;d
 ```
 
 View the column and row names. What two commands should you use?
 
 ```{r Exercise 3.2}
-# write code here
+rownames(clinic)
+colnames(clinic)
 ```
 
 View the vital status column. What two notations can be used to view columns? 
 
 ```{r Exercise 3.3}
-# write code here
+clinic$vital_status
+clinic[,15]
 ```
 
 ###### (4) Plotting
@@ -104,7 +123,12 @@ THINK: what types of variables can you use in a scatter plot (continuous, discre
 For an extra challenge, add a plot title, axes titles, and colors to your plot.
 
 ```{r Exercise 4.1}
-# create plot here
+attach(clinic)
+plot(clinic$age_at_diagnosis,clinic$breslow_thickness_at_diagnosis, 
+main="age at diagnosis vs breslow thickness at diagnosis",
+     xlab = "age",
+     ylab = "breslow thickness",
+col = rainbow(4))
 ```
 
 Choose two new variables and make a box plot (use the boxplot() function).
@@ -114,7 +138,13 @@ THINK: what types of variables can you use in a box plot?
 For an extra challenge, add a plot title, axes titles, and confidence intervals to your plot.
 
 ```{r Exercise 4.2}
-# create plot here
+names(clinic)
+clinic$birth_days_to <- as.numeric(clinic$birth_days_to)
+boxplot(clinic$birth_days_to ~ clinic$gender,
+        main = "birthdays to gender",
+        xlab = "gender",
+        ylab = "birthdays",
+        notch = TRUE)
 ```
 
 
@@ -126,23 +156,28 @@ A significant portion of your coding work will be data cleaning and preparation 
 
 1) Create a mask to remove all NA values from vital_status
 ```{r}
-vital_status_na_mask <- 
+vital_status_na_mask <- ifelse(clinic$vital_status!="[Not Available]",TRUE,FALSE)
+vital_status_clinic <- clinic[vital_status_na_mask,]
+vital_status_clinic[,15]
 ```
 
 2) Create a mask to select for male patients
 ```{r}
-male_mask <-
+male_mask <- ifelse(clinic$gender == "MALE",TRUE,FALSE)
+gender_mask <- clinic[male_mask,]
+gender_mask[,7]
 ```
 
 3) Create a mask to select for patients under the age of 35 OR over 60 at diagnosis. 
 ```{r}
-under30_over60_mask <-
+under35_over60_mask <- ifelse(clinic$age_at_diagnosis <35 |clinic$age_at_diagnosis>60, TRUE, FALSE)
 ```
 
 4) Using your under30_over60_mask, create a new dataframe called no_middle_clinic which contains all the clinical data for patients under the age of 30 or over 60 at diagnosis
 
 ```{r}
-no_middle_clinic <- 
+no_middle_clinic <- clinic[under35_over60_mask,]
+
 ```
 
 
@@ -182,8 +217,8 @@ For this example, let's create a KM plot to look at the relationship between ski
 First, check if there are any NA values in age_at_diagnosis (Hint: use the is.na() function. If you don't remember how the function works, run ?is.na() in the console). Use Boolean indexing to remove the NA values.
 
 ```{r}
-age_NA_mask <- 
-cleaned_clinic <- 
+age_NA_mask <- !is.na(no_middle_clinic$age_at_diagnosis)
+cleaned_clinic <- clinic[age_NA_mask,]
 ```
 
 Create a new column called "age_category" in cleaned_clinic that contains the value "Young" if age_at_diagnosis is <=35, "Middle" if >35 and < 50, and "Old" if >=50. (Hint: use ifelse())
@@ -191,13 +226,13 @@ Create a new column called "age_category" in cleaned_clinic that contains the va
 Note: These age threshold are relatively arbitrary, and just the ages that we are using in this example. 
 
 ```{r}
-cleaned_clinic$age_category <- 
+cleaned_clinic$age_category <- ifelse(cleaned_clinic$age_at_diagnosis <= 35, "YOUNG", ifelse(cleaned_clinic$age_at_diagnosis < 50, "MIDDLE", "OLD"))
 ```
 
 KM Plots also requires a column for total number of days survived post diagnosis. However, TCGA records survival over time two ways: last_contact_days_to for patients who are still alive, and death_days_to for patients who passed away. If a patient is still alive, their value in the death_days_to column is the string "[Not Applicable]" or "[Not Available]". Therefore, we need to create a new column called survival_time that combines the information in these two columns so there are no NA values.
 
 ```{r}
-cleaned_clinic$survival_time <- 
+cleaned_clinic$survival_time <- ifelse(cleaned_clinic$death_days_to == "[Not Applicable]" |cleaned_clinic$death_days_to == "[Not Available]", cleaned_clinic$last_contact_days_to, cleaned_clinic$death_days_to)
 ```
 
 If we check the data, we see that the values in survival_time are strings from the "" around each number. We need to convert the values to numeric in order to use them in the KM plot.
@@ -208,7 +243,7 @@ cleaned_clinic$survival_time <- as.numeric(cleaned_clinic$survival_time)
 
 Finally, we need to make a death event column that contains T if a patient has died, and F if the patient is alive. (Hint: cleaned_clinic$vital_status has "Alive" if a patient is alive and "Dead" if a patient passed.)
 ```{r}
-cleaned_clinic$death_event <- 
+cleaned_clinic$death_event <- ifelse(cleaned_clinic$vital_status=="Alive",F,T )
 ```
 
 
@@ -243,17 +278,17 @@ KM_plot
 
 Answer the following questions:
 # 1. What does the y axis represent?
-
+Survival probability
 # 2. What does the x axis represent?
-
+Time
 # 3. What age group appears to have the greatest rate of survival?
-
+Young age group
 # 4. What age group appears to have the worst rate of survival? 
-
+Old age group
 # 5. What is the approx. 15-year survival rate for "Old" skin cancer patients?
-
+37.5%
 # 6. What is the p-value? Is it statistically significant and what does that tell us about the relationship between age and skin cancer survival? 
-
+0.0022, yes it is statistically significant, tells us that there is an inverse relationship between cancer survival rate and age.
 
 
 ###### (6) Submitting Coding HW
