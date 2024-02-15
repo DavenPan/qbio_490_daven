@@ -1,0 +1,141 @@
+---
+title: "Intro_to_MAF"
+date: "2024-01-19"
+---
+
+***Deliverables***
+-Upload this R Notebook to your GitHub and submit the link to your Repo on BB.
+-Include any graphs or figures created in this assignment in the folder with your R notebook with descriptive file names.
+
+Since this is an optional partner activity, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In MAF_Tutorial.Rmd, you looked at how to analyze mutation data in terms of clinical variables as well as mutation status. In this assignment, you will need to combine the two skills to demonstrate your understanding of categorical variables and R data structures.
+
+*Pre-Assignment*
+Load all necessary packages, read in the clinical data .csv file you have in your analysis_data folder, and instantiate the MAF_object.
+```{r}
+knitr::opts_knit$set(root.dir = normalizePath("/Users/daven/Documents/qbio_490_daven/analysis_data"))
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+clinical <- read.csv("/Users/daven/Documents/qbio_490_daven/analysis_data/skcm_clinical_data.csv")
+colnames(clinical)[ colnames(clinical) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+write.csv(clinical, "/Users/daven/Documents/qbio_490_daven/analysis_data/skcm_clinical_data.csv", row.names = FALSE)
+
+```
+
+```{r}
+maf_query <- GDCquery(
+    project = "TCGA-SKCM", 
+    data.category = "Simple Nucleotide Variation", 
+    access = "open", # we only have access to somatic mutations which are open access
+    data.type = "Masked Somatic Mutation", 
+    workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+
+#GDCdownload(maf_query) # you shouldn't have to redownload any data!
+
+maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
+
+maf_object <- read.maf(maf = maf, 
+                       clinicalData = clinical,
+                       isTCGA = TRUE)
+
+
+```
+
+
+*1*
+Choose a clinical variable to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
+```{r}
+maf_assignment <- maf_object@clinical.data
+na_mask <- ifelse(maf_assignment$height_cm_at_diagnosis== '[Not Available]', F,T)
+maf_assignment <- maf_assignment[na_mask,]
+maf_assignment$height_cm_at_diagnosis <- as.numeric(maf_assignment$height_cm_at_diagnosis)
+
+median_height <- median(maf_assignment$height_cm_at_diagnosis)
+print(median_height)
+
+maf_assignment$height_category <- ifelse(maf_assignment$height_cm_at_diagnosis > median_hieght, 'Tall','Short')
+
+```
+
+
+*2*
+Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
+Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+```{r}
+Short_patient_barcodes <- maf_assignment[maf_assignment$height_category == 'Short', c("Tumor_Sample_Barcode")]
+Short_patient_barcodes <- Short_patient_barcodes$Tumor_Sample_Barcode
+
+Tall_patient_barcodes <- maf_assignment[maf_assignment$height_category == 'Tall', c("Tumor_Sample_Barcode")]
+Tall_patient_barcodes <- Tall_patient_barcodes$Tumor_Sample_Barcode
+
+Short_maf <- subsetMaf(maf = maf_object,
+                       tsb = Short_patient_barcodes)
+Tall_maf <- subsetMaf(maf = maf_object,
+                       tsb = Tall_patient_barcodes)
+
+coOncoplot(m1 = Short_maf, 
+           m2 = Tall_maf, 
+           m1Name = "Short", 
+           m2Name = "Tall", 
+           borderCol = NA)
+## Large discrepancy in the TTN
+## The TTN gene is used for encoding titin, which is a muscle protein that stabilizes the sarcomeres of the body to prevent them from overstretching
+## I am not too sure why TTN has a high mutation rate - being tall should not change how your DNA functions and mutates, but maybe the pvalue will say something different
+```
+
+*3*
+Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
+Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+```{r}
+TTN_mask <- maf.data$Hugo_Symbol == 'TTN'
+TTN_patients <- maf.data[TTN_mask, 'Tumor_Sample_Barcode']
+maf_assignment$TTN_status <- ifelse(maf_assignment$Tumor_Sample_Barcode %in% TTN_patients, 'Positive', 'Negative')
+cont_table <- table(maf_assignment$TTN_status, maf_assignment$height_category)
+mosaicplot(cont_table)
+fisher.test(cont_table)
+##The P-value given indicates there is no significant correlation between height and the rate of mutation in the TTN gene
+```
+
+
+*4*
+Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
+Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+```{r}
+
+lollipopPlot2(m1 = Short_maf,
+              m2 = Tall_maf,
+              m1_name = "Short",
+              m2_name = "Tall",
+              gene = "TTN")
+
+```
+
+
+*5*
+Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
+Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
+```{r}
+maf_assignment$days_to_last_followup <- ifelse(maf_assignment$death_days_to == "[Not Applicable]" |maf_assignment$death_days_to == "[Not Available]", maf_assignment$last_contact_days_to, maf_assignment$death_days_to)
+
+maf_assignment <- maf_assignment[maf_assignment$days_to_last_followup != '[Completed]', ]
+
+
+maf_assignment$Overall_Survival_Status <- ifelse(maf_assignment$vital_status=="Alive",F,T )
+
+maf_object@clinical.data <- maf_assignment
+
+mafSurvival(maf = maf_object,
+            genes = "TTN",
+            time = "days_to_last_followup",
+            Status = "Overall_Survival_Status",
+            clinicalData = maf_assignment,
+            isTCGA = TRUE)
+
+```
