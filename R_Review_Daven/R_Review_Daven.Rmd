@@ -1,0 +1,279 @@
+---
+title: "R Review"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+#setup repository
+```{r setup}
+#knitr::opts_knit$set(root.dir = normalizePath("/Users/daven/Documents/qbio_490_daven/analysis_data")) 
+knitr::opts_knit$set(root.dir = normalizePath("/Users/daven/Documents/qbio_490_daven/R_Review_Daven")) 
+```
+#setup data
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+
+BiocManager::install(version = "3.18")
+if (!require("TCGAbiolinks", quietly = TRUE))
+  
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+  
+BiocManager::install("maftools")
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+if (!require(survival)) {
+  install.packages("survival")
+}
+
+if (!require(survminer)) {
+  install.packages("survminer")
+}
+
+if (!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+
+library(survival)
+library(ggplot2)
+
+clin_query <- GDCquery (project = "TCGA-SKCM",
+data.category = "Clinical",
+data.type = "Clinical Supplement",
+data.format = 'BCR Biotab')
+
+GDCdownload(clin_query)
+
+clinical.BCRtab.all <- GDCprepare(clin_query)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("survminer")
+library(survminer)
+
+BiocManager::install('EnhancedVolcano')
+library(EnhancedVolcano)
+
+maf_query <- GDCquery(
+    project = "TCGA-SKCM", 
+    data.category = "Simple Nucleotide Variation", 
+    access = "open",
+    data.type = "Masked Somatic Mutation", 
+    workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+maf <- GDCprepare(maf_query)
+GDCdownload(maf_query)
+clinical <- clinical.BCRtab.all$clinical_patient_skcm[-c(1,2),]
+colnames(clinical)[ colnames(clinical) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+
+library(DESeq2)
+library(SummarizedExperiment)
+```
+```{r}
+rna_query <- GDCquery(project ="TCGA-SKCM",
+                      data.category = "Transcriptome Profiling",
+                      data.type = "Gene Expression Quantification",
+                      workflow.type = "STAR - Counts")
+
+GDCdownload(rna_query)
+rna_se <- GDCprepare(rna_query)
+rna_clinical <- rna_se@colData
+rna_clinical <- as.data.frame(rna_clinical)
+rna_clinical$Tumor_Sample_Barcode <- rna_clinical$patient
+```
+
+#Setup MAF
+```{r}
+maf <- GDCprepare(maf_query)
+maf_object <- read.maf(maf = maf, 
+                       clinicalData = rna_clinical,
+                       isTCGA = TRUE)
+maf_metastasis <- maf_object@clinical.data
+
+rna_counts <- as.data.frame(rna_se@assays@data$unstranded)
+```
+Separate between Metastatic and Non Metastatic Patients, general data cleaning
+```{r}
+Solid_Tissue_Norm_Mask <- rna_clinical$definition != "Solid Tissue Normal"
+rna_counts <- rna_counts[,Solid_Tissue_Norm_Mask]
+rna_clinical <- rna_clinical[ Solid_Tissue_Norm_Mask, ]
+Additional_Metastatic_Mask <- rna_clinical$definition != "Additional Metastatic"
+rna_counts <- rna_counts[,Additional_Metastatic_Mask]
+rna_clinical <- rna_clinical[ Additional_Metastatic_Mask, ]
+rna_clinical$definition <- ifelse(rna_clinical$definition == "Primary solid Tumor", "Non Metastatic", "Metastatic")
+
+not_reported_mask <- rna_clinical$race != "not reported"
+rna_clinical <- rna_clinical[not_reported_mask,]
+rna_counts <- rna_counts[,not_reported_mask]
+```
+#survival time and death event
+```{r}
+rna_clinical$days_survival <- rna_clinical$days_to_death
+days_survival_na <- is.na(rna_clinical$days_survival)
+rna_clinical[days_survival_na, 'days_survival'] <- rna_clinical[days_survival_na, 'days_to_last_follow_up']
+
+na_mask_days <- !is.na(rna_clinical$days_survival)
+
+rna_clinical <- rna_clinical[na_mask_days,]
+rna_counts <- rna_counts[,na_mask_days]
+not_reported_mask <- rna_clinical$vital_status != "Not Reported"
+rna_clinical <- rna_clinical[not_reported_mask,]
+rna_counts <- rna_counts[,not_reported_mask]
+
+rna_clinical$death_event <- ifelse(rna_clinical$vital_status == "Dead",T,F)
+
+```
+KM Plot
+```{r}
+survival_object <- Surv(time = rna_clinical$days_survival,
+                        event = rna_clinical$death_event)
+
+fit_object <- survfit(survival_object ~ definition, data = rna_clinical)
+
+survplot <- ggsurvplot(fit_object,
+                       pval=TRUE,
+                       ggtheme = theme(plot.margin = unit(c(1,1,1,1), "cm")),
+                       legend = 'right')
+Metastatic_KM_plot <- survplot$plot + theme_bw() + theme(axis.title = element_text(size=20), 
+                                              axis.text = element_text(size=16),
+                                              legend.title = element_text(size=14),
+                                              legend.text = element_text(size=12))
+Metastatic_KM_plot
+```
+#Create subset of Metastatic
+```{r}
+Metastatic_Barcodes <- rna_clinical[rna_clinical$definition == 'Metastatic', c("Tumor_Sample_Barcode")]
+
+Metastatic_maf <- subsetMaf(maf = maf_object,
+                       tsb = Metastatic_Barcodes)
+```
+#Create subset of Non Metastatic
+```{r}
+Non_Metastatic_Barcodes <- rna_clinical[rna_clinical$definition == 'Non Metastatic', c("Tumor_Sample_Barcode")]
+
+Non_Metastatic_maf <- subsetMaf(maf = maf_object,
+                       tsb = Non_Metastatic_Barcodes)
+```
+
+#Create Co-Oncoplot
+```{r}
+coOncoplot(m1 = Metastatic_maf, 
+           m2 = Non_Metastatic_maf, 
+           m1Name = "Metastatic", 
+           m2Name = "Non Metastatic", 
+           borderCol = NA)
+```
+#Create Co-Lollipop
+```{r}
+lollipopPlot2(m1 = Metastatic_maf,
+              m2 = Non_Metastatic_maf,
+              m1_name = "Metastatic",
+              m2_name = "Non Metastatic",
+              gene = "TTN"
+              )
+```
+#Somatic Interation Plot of Metastatic
+```{r}
+somaticInteractions(Metastatic_maf,
+                    top = 10,
+                    pvalue = c(0.05,0.01)
+)
+```
+#Somatic INteraction Plot of Non Metastatic
+```{r}
+somaticInteractions(Non_Metastatic_maf,
+                    top = 10,
+                    pvalue = c(0.05,0.01),
+)
+```
+```{r}
+rad <- clinical.BCRtab.all$clinical_radiation_skcm[-c(1,2),]
+drug <- clinical.BCRtab.all$clinical_drug_skcm[-c(1,2),]
+```
+#Identify by treatment types
+```{r}
+immun_pats <- unique(drug[drug$pharmaceutical_therapy_type == 'Immunotherapy', 'bcr_patient_barcode'])
+rna_clinical$immunotherapy <- ifelse(rna_clinical$patient %in% immun_pats$bcr_patient_barcode, 1, 0)
+
+chemo_pats <- unique(drug[drug$pharmaceutical_therapy_type == 'Chemotherapy', 'bcr_patient_barcode'])
+rna_clinical$chemotherapy <- ifelse(rna_clinical$patient %in% chemo_pats$bcr_patient_barcode, 1, 0)
+
+mol_pats <- unique(drug[drug$pharmaceutical_therapy_type == 'Targeted Molecular therapy', 'bcr_patient_barcode'])
+rna_clinical$molecular_therapy <- ifelse(rna_clinical$patient %in% mol_pats$bcr_patient_barcode, 1, 0)
+
+vac_pats <- unique(drug[drug$pharmaceutical_therapy_type == 'Vaccine', 'bcr_patient_barcode'])
+rna_clinical$vaccine <- ifelse(rna_clinical$patient %in% vac_pats$bcr_patient_barcode, 1, 0)
+
+rad_pats <-  unique(rad$bcr_patient_barcode)
+rna_clinical$radiation <- ifelse(rna_clinical$patient %in% rad_pats, 1, 0)
+
+```
+#name rna_counts columns
+```{r}
+colnames(rna_counts) <- rownames(rna_clinical)
+```
+```{r}
+vital_mask <- rna_clinical$vital_status != 'Not Reported'
+rna_clinical <- rna_clinical[vital_mask,]
+rna_clinical$vital_status <- factor(rna_clinical$vital_status, levels=c('Alive', 'Dead'))
+
+rna_clinical$gender <- factor(rna_clinical$gender, levels=c('male', 'female'))
+rna_counts <- rna_counts[,vital_mask]
+
+gene_mask <- rowSums(rna_counts) >= 20
+rna_counts <- rna_counts[gene_mask, ]
+rna_genes <- rna_genes[gene_mask,]
+
+rna_clinical$radiation <- factor(rna_clinical$radiation, levels = c(1,0))
+rna_clinical$immunotherapy <- factor(rna_clinical$immunotherapy, levels = c(1,0))
+rna_clinical$vaccine <- factor(rna_clinical$vaccine, levels = c(1,0))
+rna_clinical$molecular_therapy <- factor(rna_clinical$molecular_therapy, levels = c(1,0))
+rna_clinical$chemotherapy <- factor(rna_clinical$chemotherapy, levels = c(1,0))
+rna_clinical$definition <- factor(rna_clinical$definition, levels=c('Metastatic','Non Metastatic'))
+
+rna_clinical$gender <- factor(rna_clinical$gender, levels=c('male','female'))
+
+rna_clinical$race <- factor(rna_clinical$race, levels = c('asian','black or african american','white'))
+```
+
+
+#make the volcano plot
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = rna_counts,
+                              colData = rna_clinical,
+                              design= ~ definition + radiation + immunotherapy + vaccine + chemotherapy + molecular_therapy + race + gender + vital_status,
+)
+
+dds_obj <- DESeq(dds) 
+
+resultsNames(dds_obj)
+
+results <- results(dds_obj, format = "DataFrame", contrast = c("definition", "Metastatic" , "Non Metastatic"))
+
+results <- data.frame(results)
+results$gene_name <- rna_genes$gene_name
+```
+
+```{r}
+EnhancedVolcano(results,
+                lab = results$gene_name,
+                x = 'log2FoldChange',
+                y = 'pvalue',
+                title = 'Metastatic vs Non-Metastatic',
+                pointSize = 1.0,
+                labSize = 5.0)
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
